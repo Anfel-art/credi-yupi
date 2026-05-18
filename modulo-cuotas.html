@@ -1035,6 +1035,11 @@
     }
     .recibo-btn-wa:hover { background: #1DAA57; }
 
+    /* ─── MAPA OFFLINE OVERLAY ───────────────────────────────── */
+    #cyMapOffline.visible {
+      display: flex !important;
+    }
+
     /* ─── LOGIN SCREEN ──────────────────────────────────────── */
     #loginPage {
       position: fixed; inset: 0; z-index: 9999;
@@ -1520,6 +1525,25 @@
     }
     .nota-del:hover { opacity: 1; color: var(--rojo); background: var(--rojo-light); }
     .nota-empty { padding: 1.5rem; text-align: center; color: var(--gris-texto); font-size: .82rem; }
+    /* Notas resueltas */
+    .nota-item.resuelta { opacity: .5; background: var(--gris-fondo); }
+    .nota-item.resuelta .nota-texto { text-decoration: line-through; color: var(--gris-texto); }
+    .nota-item.rechazo { border-left: 3px solid var(--rojo); background: var(--rojo-light); }
+    .nota-item.rechazo .nota-texto { color: var(--rojo-dark); }
+    .nota-check {
+      position: absolute; top: .5rem; right: 2.2rem; background: none; border: none;
+      cursor: pointer; font-size: .75rem; color: var(--gris-texto); opacity: .4;
+      transition: opacity .15s; padding: .15rem .3rem; border-radius: 4px;
+    }
+    .nota-check:hover { opacity: 1; color: var(--verde); background: var(--verde-bg); }
+    .nota-item.resuelta .nota-check { opacity: .7; color: var(--verde); }
+    .nota-filtro-btn {
+      font-size: .72rem; font-weight: 700; border: 1.5px solid var(--gris-borde);
+      border-radius: 20px; padding: .2rem .65rem; cursor: pointer;
+      font-family: inherit; background: var(--blanco); color: var(--gris-texto);
+      transition: all .15s;
+    }
+    .nota-filtro-btn.on { background: var(--verde); color: #fff; border-color: var(--verde); }
 
     /* ─── COBRADOR DASHBOARD ─────────────────────────────────── */
     .cobr-dash { max-width: 1060px; margin: 0 auto; padding: 1.75rem 1.25rem 4rem; }
@@ -2112,7 +2136,19 @@
     </div>
 
     <!-- Mapa -->
-    <div id="cyMap"></div>
+    <div id="cyMap" style="position:relative">
+      <!-- M1: overlay visible cuando no hay conexión a internet -->
+      <div id="cyMapOffline" style="display:none;position:absolute;inset:0;z-index:1000;
+           background:rgba(244,246,251,.92);display:none;
+           flex-direction:column;align-items:center;justify-content:center;gap:.65rem;
+           pointer-events:none">
+        <div style="font-size:2rem">📡</div>
+        <div style="font-weight:800;font-size:.9rem;color:var(--dark)">Sin conexión a internet</div>
+        <div style="font-size:.78rem;color:var(--gris-texto);text-align:center;max-width:220px">
+          El mapa necesita internet para cargar los tiles.<br>Las rutas guardadas siguen disponibles.
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -3307,7 +3343,8 @@ function renderCobradorDash() {
   const renderItem = x => {
     const { c, k, r, paid, metodo, est, pago } = x;
     const moraCls = est === 'mora' ? ' mora' : '';
-    const tel = c.telefono ? c.telefono.replace(/\D/g,'') : '';
+    const tel   = c.telefono ? c.telefono.replace(/\D/g,'') : '';
+    const score = scoringCliente(c);
     const waLink = tel
       ? `https://wa.me/595${tel.replace(/^0/,'')}?text=${encodeURIComponent(`Hola ${c.nombre}, te recuerdo que hoy vence tu cuota #${k} de ${gs(r.cuota)}. ¡Gracias!`)}`
       : null;
@@ -3333,7 +3370,10 @@ function renderCobradorDash() {
     return `<div class="cobr-item">
       <div class="cobr-av${moraCls}">${c.nombre.charAt(0).toUpperCase()}</div>
       <div class="cobr-info">
-        <div class="cobr-nombre">${c.nombre}</div>
+        <div class="cobr-nombre">
+          ${c.nombre}
+          <span class="score-badge ${score.cls}" title="${score.tip}" style="font-size:.6rem;vertical-align:middle;margin-left:.3rem">${score.emoji} ${score.label}</span>
+        </div>
         <div class="cobr-det">Cuota ${k}/${c.ncuotas} · ${gs(r.cuota)}${c.telefono ? ' · 📞 '+c.telefono : ''}</div>
       </div>
       <div class="cobr-actions">
@@ -3351,13 +3391,17 @@ function renderCobradorDash() {
     <div class="sec-label" style="margin-top:1.5rem">⚠ Clientes en mora (sin cuota hoy)</div>
     <div class="panel visible" style="margin-bottom:0">
       ${enMoraHoy.map(c => {
-        const dias = diasEnMora(c);
-        const tel  = c.telefono ? c.telefono.replace(/\D/g,'') : '';
+        const dias  = diasEnMora(c);
+        const tel   = c.telefono ? c.telefono.replace(/\D/g,'') : '';
+        const scoreM = scoringCliente(c);
         const waL  = tel ? `https://wa.me/595${tel.replace(/^0/,'')}?text=${encodeURIComponent(`Hola ${c.nombre}, tenés una cuota vencida. ¿Podemos coordinar el pago? ¡Gracias!`)}` : null;
         return `<div class="cobr-item">
           <div class="cobr-av mora">${c.nombre.charAt(0).toUpperCase()}</div>
           <div class="cobr-info">
-            <div class="cobr-nombre">${c.nombre}</div>
+            <div class="cobr-nombre">
+              ${c.nombre}
+              <span class="score-badge ${scoreM.cls}" title="${scoreM.tip}" style="font-size:.6rem;vertical-align:middle;margin-left:.3rem">${scoreM.emoji} ${scoreM.label}</span>
+            </div>
             <div class="cobr-det" style="color:var(--rojo)">⚠ ${dias} día${dias!==1?'s':''} en mora${c.telefono ? ' · 📞 '+c.telefono : ''}</div>
           </div>
           <div class="cobr-actions">
@@ -3672,20 +3716,47 @@ function aprobarTransfer(clienteId, k) {
 }
 
 function rechazarTransfer(clienteId, k) {
-  if (!confirm('¿Rechazar este pago? La cuota volverá a estar pendiente y el cliente deberá registrar un nuevo comprobante.')) return;
+  /* M3: pedir motivo antes de rechazar */
+  const motivo = prompt(
+    '¿Rechazar este comprobante de transferencia?\n\n' +
+    'Motivo del rechazo (opcional — se guardará como nota en el cliente):'
+  );
+  if (motivo === null) return;   /* usuario canceló el prompt */
+
   const lista = cargarClientes();
   const c = lista.find(x => x.id === clienteId);
   if (!c || !c.pagos) return;
+
+  /* Recuperar datos del comprobante antes de borrarlo */
+  const pagoObj = (c.pagos[k] && typeof c.pagos[k] === 'object') ? c.pagos[k] : {};
+  const banco   = pagoObj.banco       ? ` · Banco: ${pagoObj.banco}` : '';
+  const ref     = pagoObj.referencia  ? ` · Ref: #${pagoObj.referencia}` : '';
+
+  /* Guardar nota automática con el motivo */
+  if (!c.notas) c.notas = [];
+  const s = getSession() || {};
+  const textoNota = `🚫 Transferencia rechazada — Cuota #${k}${banco}${ref}` +
+    (motivo.trim() ? `\nMotivo: ${motivo.trim()}` : '');
+  c.notas.push({
+    id:     Date.now(),
+    texto:  textoNota,
+    fecha:  new Date().toISOString(),
+    autor:  s.nombre || 'Admin',
+    tipo:   'rechazo'   /* marca interna para estilizar distinto */
+  });
+
   c.pagos[k] = false;   /* revertir a no pagado */
   guardarStorage(lista);
   actualizarStats();
   renderPendientesVerif(cargarClientes());
-  /* Si el perfil de ese cliente está abierto, actualizar tabla */
+  mostrarToast('⚠ Transferencia rechazada — nota guardada en el cliente', 'var(--rojo)');
+
+  /* Si el perfil de ese cliente está abierto, actualizar */
   if (clienteActualId === clienteId) {
     const sec = document.getElementById('sec-perfil');
     if (sec && sec.style.display !== 'none') renderPerfil(clienteId);
   }
-  /* Actualizar celda si está visible en alguna tabla */
+  /* Actualizar celda si está visible */
   const cell = document.querySelector(`[data-pago-cell="${clienteId}-${k}"]`);
   if (cell) {
     cell.innerHTML = `<button onclick="mostrarSelectorMetodo('${clienteId}',${k})"
@@ -4710,7 +4781,7 @@ function actualizarPreviewRefi() {
   const fac     = Math.pow(1 + i, ncuotas);
   let cuotaVal;
   if (sistema === 'frances') {
-    cuotaVal = Math.round(totalNuevo * i * fac / (fac - 1));
+    cuotaVal = i === 0 ? Math.round(totalNuevo / ncuotas) : Math.round(totalNuevo * i * fac / (fac - 1));
   } else {
     const totInt = Math.round(totalNuevo * i * ncuotas);
     cuotaVal = Math.round((totalNuevo + totInt) / ncuotas);
@@ -4741,14 +4812,14 @@ function confirmarRefinanciamiento() {
 
   if (!fechaStr)   { errEl.textContent='Seleccioná la fecha de inicio'; errEl.style.display=''; return; }
   if (ncuotas < 1) { errEl.textContent='Ingresá una cantidad de cuotas válida'; errEl.style.display=''; return; }
-  if (tna <= 0)    { errEl.textContent='Ingresá una tasa de interés válida'; errEl.style.display=''; return; }
+  if (tna < 0)     { errEl.textContent='La tasa de interés no puede ser negativa'; errEl.style.display=''; return; }
   if (total <= 0)  { errEl.textContent='El total del nuevo crédito debe ser mayor a 0'; errEl.style.display=''; return; }
 
   const i      = tasaPeriodo(tna / 100, freq);
   const fac    = Math.pow(1 + i, ncuotas);
   let cuotaVal;
   if (sistema === 'frances') {
-    cuotaVal = Math.round(total * i * fac / (fac - 1));
+    cuotaVal = i === 0 ? Math.round(total / ncuotas) : Math.round(total * i * fac / (fac - 1));
   } else {
     const totInt = Math.round(total * i * ncuotas);
     cuotaVal = Math.round((total + totInt) / ncuotas);
@@ -4969,9 +5040,30 @@ function inicializarMapa() {
   if (!cyMap) {
     cyMap = L.map('cyMap', {zoomControl:false}).setView(PY_DEFAULT, 12);
     L.control.zoom({position:'topright'}).addTo(cyMap);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+
+    /* M1: tile layer con detección offline */
+    const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom:19, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     }).addTo(cyMap);
+
+    const overlayOffline = document.getElementById('cyMapOffline');
+    let tileErrCount = 0;
+    tileLayer.on('tileerror', () => {
+      tileErrCount++;
+      if (tileErrCount >= 3 && overlayOffline) overlayOffline.classList.add('visible');
+    });
+    tileLayer.on('tileload', () => {
+      tileErrCount = 0;
+      if (overlayOffline) overlayOffline.classList.remove('visible');
+    });
+
+    /* También escuchar eventos de red del navegador */
+    window.addEventListener('offline', () => { if (overlayOffline) overlayOffline.classList.add('visible'); });
+    window.addEventListener('online',  () => { if (overlayOffline) overlayOffline.classList.remove('visible'); cyMap.invalidateSize(); });
+
+    /* Mostrar de inmediato si ya está offline */
+    if (!navigator.onLine && overlayOffline) overlayOffline.classList.add('visible');
+
     if (navigator.geolocation) {
       navigator.geolocation.watchPosition(
         pos => actualizarUbicUsuario([pos.coords.latitude, pos.coords.longitude]),
@@ -5901,6 +5993,8 @@ function switchPerfilTab(tab) {
    NOTAS POR CLIENTE
    ══════════════════════════════════════════════════════════════ */
 
+let _notasMostrarResueltas = false;   /* estado del filtro de notas resueltas */
+
 function renderNotasCliente(id) {
   const wrap = document.getElementById('perfilNotasWrap');
   if (!wrap || !id) return;
@@ -5908,25 +6002,44 @@ function renderNotasCliente(id) {
   const c = lista.find(x => x.id === id);
   if (!c) return;
   const notas = c.notas || [];
-  const s = getSession() || {};
 
-  const notasHTML = notas.length === 0
-    ? `<div class="nota-empty">📝 Sin notas registradas. Usá el campo de arriba para agregar una.</div>`
-    : notas.slice().reverse().map((n, idx) => {
-        const realIdx = notas.length - 1 - idx;
+  const totalNotas    = notas.length;
+  const resueltas     = notas.filter(n => n.resuelta).length;
+  const pendientes    = totalNotas - resueltas;
+  const filtradas     = _notasMostrarResueltas
+    ? notas
+    : notas.filter(n => !n.resuelta);
+
+  const notasHTML = filtradas.length === 0
+    ? `<div class="nota-empty">${totalNotas === 0 ? '📝 Sin notas registradas. Usá el campo de arriba para agregar una.' : '✅ Todas las notas están marcadas como resueltas.'}</div>`
+    : filtradas.slice().reverse().map(n => {
+        const realIdx = notas.indexOf(n);
         const fecha = n.fecha ? new Date(n.fecha).toLocaleDateString('es-PY', {
           day: '2-digit', month: '2-digit', year: 'numeric',
           hour: '2-digit', minute: '2-digit'
         }) : '—';
-        return `<div class="nota-item">
+        const clsExtra = (n.resuelta ? ' resuelta' : '') + (n.tipo === 'rechazo' ? ' rechazo' : '');
+        const tipCheck = n.resuelta ? 'Marcar como pendiente' : 'Marcar como resuelta';
+        return `<div class="nota-item${clsExtra}">
           <div class="nota-meta">
             <span>🕐 ${fecha}</span>
             <span style="background:var(--azul-light);color:var(--azul);border-radius:8px;padding:1px 7px">${n.autor || 'Sistema'}</span>
+            ${n.resuelta ? '<span style="background:var(--verde-bg);color:var(--verde);border-radius:8px;padding:1px 7px;font-size:.6rem">✓ Resuelta</span>' : ''}
           </div>
           <div class="nota-texto">${n.texto.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+          <button class="nota-check" onclick="toggleResueltaNota('${id}',${realIdx})" title="${tipCheck}">
+            ${n.resuelta ? '↩' : '✓'}
+          </button>
           <button class="nota-del" onclick="eliminarNota('${id}',${realIdx})" title="Eliminar nota">✕</button>
         </div>`;
       }).join('');
+
+  const btnFiltro = resueltas > 0
+    ? `<button class="nota-filtro-btn${_notasMostrarResueltas ? ' on' : ''}"
+         onclick="_notasMostrarResueltas=!_notasMostrarResueltas;renderNotasCliente('${id}')">
+         ${_notasMostrarResueltas ? '🙈 Ocultar resueltas' : `👁 Ver resueltas (${resueltas})`}
+       </button>`
+    : '';
 
   wrap.innerHTML = `
     <div class="nota-add-box">
@@ -5934,11 +6047,21 @@ function renderNotasCliente(id) {
         oninput="document.getElementById('notaCharCnt').textContent=this.value.length+'/500'"></textarea>
       <div class="nota-add-row">
         <span class="nota-char-cnt" id="notaCharCnt">0/500</span>
+        ${btnFiltro}
         <button class="btn-calc" style="padding:.45rem 1.1rem;font-size:.8rem"
           onclick="agregarNota('${id}')">📝 Guardar nota</button>
       </div>
     </div>
     <div class="nota-list">${notasHTML}</div>`;
+}
+
+function toggleResueltaNota(clienteId, idx) {
+  const lista = cargarClientes();
+  const c = lista.find(x => x.id === clienteId);
+  if (!c || !c.notas || !c.notas[idx]) return;
+  c.notas[idx].resuelta = !c.notas[idx].resuelta;
+  guardarStorage(lista);
+  renderNotasCliente(clienteId);
 }
 
 function agregarNota(id) {
