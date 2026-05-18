@@ -4055,7 +4055,12 @@ function filtrarClientes() {
 
 /* ── ESTADÍSTICAS ──────────────────────────────────────────── */
 function actualizarStats() {
-  const lista    = cargarClientes();
+  /* A2: filtrar por cartera propia si el usuario es cobrador */
+  let lista = cargarClientes();
+  const _s  = getSession();
+  if (_s && _s.rol === 'cobrador') {
+    lista = lista.filter(c => c.cobradorId === _s.id);
+  }
   const activos  = lista.filter(c => estadoCliente(c) !== 'cancel');
   const enMora   = lista.filter(c => estadoCliente(c) === 'mora');
   const cancel   = lista.filter(c => estadoCliente(c) === 'cancel');
@@ -5725,18 +5730,31 @@ function renderPerfil(id) {
 
   /* ── Hero ── */
   const stLbl = { aldia:'Al día ✓', mora:'En mora ⚠', cancel:'Cancelado ✓', refinanciado:'Refinanciado 🔄' };
+
+  /* A1: buscar nombre del cobrador asignado (solo admin/superadmin lo ve) */
+  const _sesionPerfil = getSession();
+  let cobradorNombrePerfil = null;
+  if (_sesionPerfil && _sesionPerfil.rol !== 'cliente' && c.cobradorId) {
+    const _cobU = cargarUsuarios().find(u => u.id === c.cobradorId);
+    if (_cobU) cobradorNombrePerfil = _cobU.nombre;
+  }
+
   document.getElementById('perfilAv').textContent      = c.nombre.charAt(0).toUpperCase();
   document.getElementById('perfilNombre').textContent  = c.nombre;
   document.getElementById('perfilSub').textContent     =
-    `CI: ${c.cedula||'—'} · Tel: ${c.telefono||'—'}${c.direccion ? ' · '+c.direccion : ''}`;
+    `CI: ${c.cedula||'—'} · Tel: ${c.telefono||'—'}${c.direccion ? ' · '+c.direccion : ''}` +
+    (cobradorNombrePerfil ? ` · 👤 ${cobradorNombrePerfil}` : '');
 
-  /* badge de estado + scoring + mora + refinanciamiento */
+  /* badge de estado + scoring + mora + refinanciamiento + cobrador */
   const score = scoringCliente(c);
   const dias  = est === 'mora' ? diasEnMora(c) : 0;
   let badges = `<span style="display:inline-block;background:rgba(255,255,255,.15);color:#fff;font-size:.68rem;font-weight:800;padding:3px 10px;border-radius:10px;letter-spacing:.04em;text-transform:uppercase">${stLbl[est]}</span>`;
   badges += ` <span class="score-badge ${score.cls}" title="${score.tip}" style="vertical-align:middle">${score.emoji} ${score.label}</span>`;
   if (dias > 0) {
     badges += ` <span style="display:inline-block;background:rgba(204,34,41,.3);color:#fff;font-size:.65rem;font-weight:800;padding:3px 10px;border-radius:10px;letter-spacing:.02em;margin-left:.2rem">⚠ ${dias} día${dias !== 1 ? 's' : ''} en mora</span>`;
+  }
+  if (cobradorNombrePerfil) {
+    badges += ` <span style="display:inline-block;background:rgba(255,255,255,.12);color:rgba(255,255,255,.85);font-size:.65rem;font-weight:700;padding:3px 10px;border-radius:10px;letter-spacing:.02em;margin-left:.2rem">👤 ${cobradorNombrePerfil}</span>`;
   }
   if (c.origenRefi) {
     badges += ` <span style="display:inline-block;background:rgba(255,255,255,.12);color:rgba(255,255,255,.8);font-size:.65rem;font-weight:800;padding:3px 10px;border-radius:10px;letter-spacing:.04em;margin-left:.35rem">🔄 Refinanciamiento — saldo ant: ${gs(c.origenRefi.saldoPendiente)}</span>`;
@@ -6165,13 +6183,17 @@ function exportarCSV() {
   const BOM = '﻿';   /* BOM para que Excel detecte UTF-8 */
   const SEP = ';';        /* separador compatible con Excel en es-PY */
 
+  /* A3: mapa id→nombre de cobradores para la columna Cobrador */
+  const cobrMap = {};
+  cargarUsuarios().filter(u => u.rol === 'cobrador').forEach(u => { cobrMap[u.id] = u.nombre; });
+
   const encabezados = [
     'Nombre', 'Cédula', 'Teléfono', 'Dirección',
     'Monto prestado', 'Sistema', 'Frecuencia', 'TNA (%)', 'N° cuotas', 'Cuota',
     'Fecha inicio', 'Estado',
     'Cuotas pagadas', 'Cuotas pendientes',
     'Total pagado (Gs)', 'Total pendiente (Gs)',
-    'Días en mora', 'Scoring'
+    'Días en mora', 'Scoring', 'Cobrador asignado'
   ];
 
   const stLbl  = { aldia: 'Al día', mora: 'En mora', cancel: 'Cancelado', refinanciado: 'Refinanciado' };
@@ -6190,6 +6212,7 @@ function exportarCSV() {
     const est      = estadoCliente(c);
     const dias     = est === 'mora' ? diasEnMora(c) : 0;
     const score    = scoringCliente(c);
+    const cobrador = c.cobradorId ? (cobrMap[c.cobradorId] || '—') : 'Sin asignar';
 
     return [
       c.nombre, c.cedula || '', c.telefono || '', c.direccion || '',
@@ -6197,7 +6220,7 @@ function exportarCSV() {
       c.fechaInicio, stLbl[est] || est,
       pagadas.length, pend.length,
       totPag, totPend,
-      dias, `${score.emoji} ${score.label}`
+      dias, `${score.emoji} ${score.label}`, cobrador
     ].map(esc).join(SEP);
   });
 
