@@ -1,0 +1,18 @@
+# Logs
+server.log
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Claude
+.claude/
+
+# Imágenes de trabajo / capturas internas
+# (descomenta si no querés subir las imágenes)
+# Imagenes/
