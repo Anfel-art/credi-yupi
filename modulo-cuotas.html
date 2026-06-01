@@ -3464,9 +3464,10 @@ const fmtGs   = n => Math.round(n).toLocaleString('es-PY');
 const fmtF    = d => d.toLocaleDateString('es-PY',{day:'2-digit',month:'2-digit',year:'numeric'});
 const addPer  = (d, n, freq) => {
   const r = new Date(d);
-  if (freq==='diaria')  r.setDate(r.getDate()+n);
-  else if (freq==='semanal') r.setDate(r.getDate()+n*7);
-  else r.setMonth(r.getMonth()+n);
+  if      (freq==='diaria')     r.setDate(r.getDate()+n);
+  else if (freq==='semanal')    r.setDate(r.getDate()+n*7);
+  else if (freq==='quincenal')  r.setDate(r.getDate()+n*15);
+  else                          r.setMonth(r.getMonth()+n);
   return r;
 };
 
@@ -3601,8 +3602,9 @@ function limpiarAuditLog() {
 
 /* ── FRECUENCIA → TASA PERÍODO ───────────────────────────────── */
 function tasaPeriodo(tna, freq) {
-  if (freq==='diaria')  return tna/365;
-  if (freq==='semanal') return tna/52;
+  if (freq==='diaria')    return tna/365;
+  if (freq==='semanal')   return tna/52;
+  if (freq==='quincenal') return tna/24;
   return tna/12;
 }
 function freqLabel(freq) {
@@ -3678,7 +3680,7 @@ function actualizarTNA() {
   const tna  = parseFloat(document.getElementById('tna').value)||0;
   const freq = document.getElementById('freq').value;
   const ip   = tasaPeriodo(tna/100, freq);
-  const tea  = (Math.pow(1+ip,freq==='diaria'?365:freq==='semanal'?52:12)-1)*100;
+  const tea  = (Math.pow(1+ip,freq==='diaria'?365:freq==='semanal'?52:freq==='quincenal'?24:12)-1)*100;
   const el   = document.getElementById('tnaStatus');
   if (tea <= BCP_TEA)       { el.style.color='var(--verde)';  el.textContent=`✔ TEA ${tea.toFixed(2)}% — dentro del límite BCP`; }
   else if (tea<=BCP_TEA*1.3){ el.style.color='#F59E0B'; el.textContent=`⚠ TEA ${tea.toFixed(2)}% — supera límite BCP`; }
@@ -3739,7 +3741,7 @@ function calcFrances(P, i, n, freq) {
     tabla.push({k, f:addPer(fechaBase,k-1,freq), int, cap, cuota:int+cap, s});
   }
   const tp  = tabla.reduce((a,r)=>a+r.cuota,0);
-  const per = freq==='diaria'?365:freq==='semanal'?52:12;
+  const per = freq==='diaria'?365:freq==='semanal'?52:freq==='quincenal'?24:12;
   const tea = ((Math.pow(1+i,per)-1)*100).toFixed(2);
   return {
     sistema:'francés', cuota1:cuota, cuotaMin:cuota, cuotaMax:cuota, tp, ti:tp-P, tabla, tea, freq,
@@ -3759,7 +3761,7 @@ function calcAleman(P, i, n, freq) {
     tabla.push({k, f:addPer(fechaBase,k-1,freq), int, cap, cuota:cap+int, s});
   }
   const tp  = tabla.reduce((a,r)=>a+r.cuota,0);
-  const per = freq==='diaria'?365:freq==='semanal'?52:12;
+  const per = freq==='diaria'?365:freq==='semanal'?52:freq==='quincenal'?24:12;
   const tea = ((Math.pow(1+i,per)-1)*100).toFixed(2);
   return {
     sistema:'alemán', cuota1:tabla[0].cuota, cuotaMin:tabla[n-1].cuota, cuotaMax:tabla[0].cuota, tp, ti:tp-P, tabla, tea, freq,
@@ -3778,7 +3780,7 @@ function calcAmericano(P, i, n, freq) {
     tabla.push({k, f:addPer(fechaBase,k-1,freq), int:intP, cap, cuota:cap+intP, s:esU?0:P});
   }
   const tp  = tabla.reduce((a,r)=>a+r.cuota,0);
-  const per = freq==='diaria'?365:freq==='semanal'?52:12;
+  const per = freq==='diaria'?365:freq==='semanal'?52:freq==='quincenal'?24:12;
   const tea = ((Math.pow(1+i,per)-1)*100).toFixed(2);
   return {
     sistema:'americano', cuota1:intP, cuotaMin:intP, cuotaMax:intP+P, tp, ti:tp-P, tabla, tea, freq,
@@ -3802,7 +3804,7 @@ function calcFlat(P, i, n, freq, tna) {
   }
   const tp    = tabla.reduce((a,r)=>a+r.cuota,0);
   const tirM  = tirMens(P,cuota,n);
-  const per   = freq==='diaria'?365:freq==='semanal'?52:12;
+  const per   = freq==='diaria'?365:freq==='semanal'?52:freq==='quincenal'?24:12;
   const tea   = ((Math.pow(1+tirM,per)-1)*100).toFixed(2);
   return {
     sistema:'flat', cuota1:cuota, cuotaMin:cuota, cuotaMax:cuota, tp, ti:totInt, tabla, tea, freq, esFlat:true,
@@ -3922,7 +3924,8 @@ async function sha256(text) {
     const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
     return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
   }
-  return _sha256JS(text);   /* fallback para HTTP sin secure context */
+  /* Fallback async: cede el event loop antes de calcular para no congelar UI */
+  return new Promise(resolve => setTimeout(() => resolve(_sha256JS(text)), 0));
 }
 function _sha256JS(msg) {
   function rr(v,a){return(v>>>a)|(v<<(32-a));}
@@ -5166,9 +5169,7 @@ function renderDashboard() {
         });
       }
 
-      if (!esPagada(p)) return;
-
-      /* INC-06: cuotas esperadas este mes (por fecha de vencimiento) */
+      /* INC-06: cuotas esperadas este mes — todas (pagadas y pendientes) con vencimiento en el mes */
       if (est !== 'cancel') {
         const fv = r.f instanceof Date ? r.f : new Date(r.f);
         if (fv.getMonth() === mesActual && fv.getFullYear() === anioActual) {
@@ -5176,6 +5177,8 @@ function renderDashboard() {
           cuotasEsperadasMes++;
         }
       }
+
+      if (!esPagada(p)) return;
 
       /* ── Estadísticas de cobros ── */
       if (fs) {
@@ -6053,10 +6056,7 @@ function verDetalle(id) {
   const c = cargarClientes().find(x => x.id === id);
   if (!c) return;
 
-  const i     = tasaPeriodo(c.tna / 100, c.freq);
-  const tabla = c.sistema === 'frances'
-    ? calcFrancesData(c.monto, i, c.ncuotas, c.freq, new Date(c.fechaInicio))
-    : calcFlatData(c.monto, i, c.ncuotas, c.freq, new Date(c.fechaInicio));
+  const tabla = calcularTabla(c);   /* unificado: soporta frances/flat/aleman/americano */
 
   const pagos   = c.pagos || {};
   const totPag  = tabla.filter((_, ki) =>  esPagada(pagos[ki+1])).reduce((s, r) => s + r.cuota, 0);
@@ -6821,13 +6821,38 @@ function eliminarClienteActual() {
   renderClientes();
 }
 
+/* ── DATA FUNCTIONS PARA TABLA DE CUOTAS ───────────────────── */
+function calcAlemanData(P, i, n, freq, ini) {
+  const capF = Math.round(P / n);
+  const t = []; let s = P;
+  for (let k = 1; k <= n; k++) {
+    const int = Math.round(s * i);
+    const cap = k === n ? s : capF;
+    s = Math.max(0, s - cap);
+    t.push({ k, f: addPer(ini, k - 1, freq), int, cap, cuota: cap + int, s });
+  }
+  return t;
+}
+function calcAmericanoData(P, i, n, freq, ini) {
+  const intP = Math.round(P * i);
+  const t = [];
+  for (let k = 1; k <= n; k++) {
+    const esU = k === n;
+    const cap = esU ? P : 0;
+    t.push({ k, f: addPer(ini, k - 1, freq), int: intP, cap, cuota: cap + intP, s: esU ? 0 : P });
+  }
+  return t;
+}
+
 /* ── HELPER UNIFICADO DE TABLA ─────────────────────────────── */
 function calcularTabla(c) {
-  const i = tasaPeriodo(c.tna / 100, c.freq);
+  const i   = tasaPeriodo(c.tna / 100, c.freq);
   const ini = new Date(c.fechaInicio);
-  return c.sistema === 'frances'
-    ? calcFrancesData(c.monto, i, c.ncuotas, c.freq, ini)
-    : calcFlatData(c.monto, i, c.ncuotas, c.freq, ini);
+  const P   = c.monto, n = c.ncuotas, f = c.freq;
+  if (c.sistema === 'frances')   return calcFrancesData(P, i, n, f, ini);
+  if (c.sistema === 'aleman')    return calcAlemanData(P, i, n, f, ini);
+  if (c.sistema === 'americano') return calcAmericanoData(P, i, n, f, ini);
+  return calcFlatData(P, i, n, f, ini);   /* flat (default) */
 }
 
 /* ── INC-01: INTERÉS POR MORA ─────────────────────────────── */
@@ -7415,7 +7440,7 @@ function buildEventosCredito(c) {
     ],
     sub: c.origenRefi
       ? `Saldo anterior: ${gs(c.origenRefi.saldoPendiente)} + Adicional: ${gs(c.origenRefi.montoAdicional)}`
-      : `Sistema ${c.sistema === 'frances' ? 'cuota fija' : 'cuota simple'} · Cuota: ${gs(c.cuotaVal)}`,
+      : `Sistema ${{frances:'cuota fija',flat:'cuota simple',aleman:'cuota decreciente',americano:'bullet'}[c.sistema]||c.sistema} · Cuota: ${gs(c.cuotaVal)}`,
   });
 
   /* 2 — Pagos realizados */
@@ -9249,7 +9274,7 @@ function exportarCSV() {
   ];
 
   const stLbl  = { aldia: 'Al día', mora: 'En mora', cancel: 'Cancelado', refinanciado: 'Refinanciado' };
-  const sysLbl = { frances: 'Francés (cuota fija)', flat: 'Flat (cuota simple)' };
+  const sysLbl = { frances: 'Francés (cuota fija)', flat: 'Flat (cuota simple)', aleman: 'Alemán (cuota decreciente)', americano: 'Americano (bullet)' };
   const freqLbl = { mensual: 'Mensual', quincenal: 'Quincenal', semanal: 'Semanal', diaria: 'Diaria', diario: 'Diario' };
 
   /* SEC-07: prevenir inyección de fórmulas en Excel (CSV injection) */
