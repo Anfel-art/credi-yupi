@@ -3576,7 +3576,11 @@ function renderStorageUsage() {
 function purgarFotosSols() {
   const s = getSession();
   if (!s || s.rol !== 'superadmin') { mostrarToast('❌ Solo superadmin', 'var(--rojo)'); return; }
-  if (!confirm('¿Eliminar las fotos (CI y ANDE) de todas las solicitudes aprobadas, rechazadas y canceladas?\n\nLos datos del formulario se conservan.')) return;
+  _confirmToast('purgar', 'Eliminará fotos de solicitudes cerradas (los datos se conservan)', () => _doPurgarFotos());
+}
+function _doPurgarFotos() {
+  const s = getSession();
+  if (!s || s.rol !== 'superadmin') return;
   try {
     const sols = JSON.parse(localStorage.getItem('cy_solicitudes') || '[]');
     let cnt = 0;
@@ -3594,7 +3598,8 @@ function purgarFotosSols() {
 function limpiarAuditLog() {
   const s = getSession();
   if (!s || s.rol !== 'superadmin') return;
-  if (!confirm('¿Limpiar todo el log de auditoría? Esta acción no se puede deshacer.')) return;
+  _confirmToast('auditLog', 'Limpiará todo el log — acción irreversible', () => { localStorage.removeItem(_AUDIT_KEY); renderAuditLog(); mostrarToast('🗑 Log de auditoría limpiado', 'var(--gris-texto)'); });
+  return;
   localStorage.removeItem(_AUDIT_KEY);
   renderAuditLog();
   mostrarToast('🗑 Log de auditoría limpiado', 'var(--gris-texto)');
@@ -3614,8 +3619,9 @@ function freqLabelPl(freq) {
   return {diaria:'diarias', semanal:'semanales', mensual:'mensuales', quincenal:'quincenales'}[freq] || (freq+'s');
 }
 function freqDesc(n, freq) {
-  if (freq==='diaria')  return `${n} días ≈ ${(n/30).toFixed(1)} meses`;
-  if (freq==='semanal') return `${n} semanas ≈ ${(n/4.3).toFixed(1)} meses`;
+  if (freq==='diaria')    return `${n} días ≈ ${(n/30).toFixed(1)} meses`;
+  if (freq==='semanal')   return `${n} semanas ≈ ${(n/4.3).toFixed(1)} meses`;
+  if (freq==='quincenal') return `${n} quincenas ≈ ${(n/2).toFixed(1)} meses`;
   return `${n} meses`;
 }
 
@@ -3709,7 +3715,10 @@ function calcular() {
   const n      = parseInt(document.getElementById('ncuotas').value)||0;
   const tna    = parseFloat(document.getElementById('tna').value)/100;
   const freq   = document.getElementById('freq').value;
-  if (!monto||!n||!tna) return;
+  if (!monto || monto <= 0) return;
+  if (!n || n < 1)         return;
+  if (tna < 0)             return;   /* Bug #6: evitar cuotas negativas con TNA negativa */
+  if (!tna && tna !== 0)   return;
 
   const i = tasaPeriodo(tna, freq);
 
@@ -4679,7 +4688,9 @@ function confirmarCancelacionSol() {
 }
 
 function rechazarSolicitud(id) {
-  if (!confirm('¿Rechazar esta solicitud de crédito?')) return;
+  _confirmToast('rechazar-' + id, 'Rechazará esta solicitud', () => _doRechazar(id));
+}
+function _doRechazar(id) {
   const lista = cargarSolicitudes();
   const idx   = lista.findIndex(s => s.id === id);
   if (idx >= 0) lista[idx].estado = 'rechazada';
@@ -4732,7 +4743,6 @@ async function doRegistro() {
 
 /* ── LOGOUT ────────────────────────────────────────────────── */
 function doLogout() {
-  if (!confirm('¿Cerrar sesión?')) return;
   clearSession();
   location.reload();
 }
@@ -5485,7 +5495,9 @@ function _renderCobrosHoy(lista) {
 /* MISS-03: Pago masivo — marcar todos los cobros de hoy como Efectivo */
 function marcarTodosHoyEfectivo() {
   const hoyStr  = fmtF(new Date());
-  if (!confirm(`¿Registrar todos los cobros pendientes de HOY (${hoyStr}) como pagados en Efectivo?\n\nEsta acción es reversible desde el perfil de cada cliente.`)) return;
+  _confirmToast('masivo-' + hoyStr, `Marcará todos los cobros de hoy (${hoyStr}) como Efectivo`, () => _doMarcarTodos(hoyStr));
+}
+function _doMarcarTodos(hoyStr) {
 
   const lista   = cargarClientes();
   let contPag   = 0;
@@ -5641,35 +5653,38 @@ function saveConfig(data) { localStorage.setItem('cy_config', JSON.stringify({ .
 function scoringCliente(c) {
   const pagos  = c.pagos || {};
   const tabla  = calcularTabla(c);
-  const hoy    = new Date();
-  const ini    = new Date(c.fechaInicio);
-  let maxMora  = 0;    // días máximos de mora en cualquier cuota
+  const hoy    = new Date(); hoy.setHours(0,0,0,0);
+  let maxMora  = 0;   /* días máximos de mora en cualquier cuota */
   let cuotasMora = 0;
 
   tabla.forEach((r, ki) => {
     const k  = ki + 1;
     const p  = pagos[k];
-    const fv = addPer(ini, k - 1, c.freq);   /* usa k-1 consistente con calcularTabla */
+    /* Usar r.f de la tabla (ya calculado correctamente por calcularTabla) */
+    const fv = r.f instanceof Date ? r.f : new Date(r.f);
+    fv.setHours(0,0,0,0);
 
     if (!esPagada(p)) {
-      /* cuota no pagada */
+      /* cuota no pagada — mora si venció */
       if (fv < hoy) {
         const dias = Math.floor((hoy - fv) / 86400000);
         if (dias > maxMora) maxMora = dias;
         cuotasMora++;
       }
     } else {
-      /* cuota pagada — ver si llegó tarde */
+      /* cuota pagada — verificar si llegó tarde */
       const fechaStr = (typeof p === 'object' && p.fecha) ? p.fecha : null;
       if (fechaStr) {
         const [d, m, a] = fechaStr.split('/').map(Number);
-        const fp = new Date(a, m - 1, d);
+        const fp = new Date(a, m - 1, d); fp.setHours(0,0,0,0);
         if (fp > fv) {
           const dias = Math.floor((fp - fv) / 86400000);
           if (dias > maxMora) maxMora = dias;
           cuotasMora++;
         }
       }
+      /* Nota: pagos guardados como boolean true (formato viejo) no tienen fecha
+         → no se pueden evaluar → se omiten del scoring (comportamiento conservador) */
     }
   });
 
@@ -5959,11 +5974,17 @@ function guardarCliente() {
   const fecha    = document.getElementById('cliFecha').value;
   const sistema  = document.getElementById('cliSistema').value;
 
-  if (!nombre)         { alert('Ingresá el nombre del cliente.');           return; }
-  if (!monto)          { alert('Ingresá el monto del crédito.');            return; }
-  if (!ncuotas)        { alert('Ingresá la cantidad de cuotas.');           return; }
-  if (!fecha)          { alert('Ingresá la fecha de inicio.');               return; }
-  if (tna < 0)         { alert('La tasa de interés no puede ser negativa.'); return; }
+  if (!nombre)         { mostrarToast('❌ Ingresá el nombre del cliente', 'var(--rojo)');            return; }
+  if (!monto || monto <= 0) { mostrarToast('❌ El monto debe ser mayor a 0', 'var(--rojo)');        return; }
+  if (!ncuotas || ncuotas < 1) { mostrarToast('❌ Ingresá al menos 1 cuota', 'var(--rojo)');        return; }
+  if (!fecha)          { mostrarToast('❌ Ingresá la fecha de inicio', 'var(--rojo)');               return; }
+  if (tna < 0)         { mostrarToast('❌ La tasa de interés no puede ser negativa', 'var(--rojo)'); return; }
+  /* Bug #7: validar que la fecha no esté demasiado lejos en el pasado o futuro */
+  const _fechaDate = new Date(fecha);
+  const _anioFecha = _fechaDate.getFullYear();
+  if (_anioFecha < 2000 || _anioFecha > new Date().getFullYear() + 2) {
+    mostrarToast('❌ La fecha de inicio parece incorrecta — verificá el año', 'var(--rojo)'); return;
+  }
 
   const i = tasaPeriodo(tna / 100, freq);
   let cuotaVal;
@@ -5990,7 +6011,7 @@ function guardarCliente() {
   if (cedula) {
     const dup = lista.find(x => x.id !== editId && x.cedula === cedula);
     if (dup) {
-      alert(`⚠ Ya existe un cliente con la cédula ${cedula}:\n"${dup.nombre}"\n\nVerificá los datos antes de continuar.`);
+      mostrarToast(`⚠ Ya existe un cliente con esa cédula: "${dup.nombre}"`, 'var(--rojo)');
       return;
     }
   }
@@ -6431,6 +6452,21 @@ function mostrarToastPago(banco, ref) {
   mostrarToast(`✅ Pago registrado · ${banco} · Ref: ${ref}`);
 }
 
+/* ── CONFIRMACIÓN EN DOS TOQUES (reemplaza confirm() nativo) ──
+   Primer toque: muestra toast naranja de advertencia.
+   Segundo toque dentro de 4 s: ejecuta la acción.             */
+const _ctState = {};
+function _confirmToast(key, msg, fn) {
+  if (_ctState[key]) {
+    clearTimeout(_ctState[key]);
+    delete _ctState[key];
+    fn();
+  } else {
+    mostrarToast(`⚠️ ${msg} — Tocá de nuevo para confirmar`, '#D97706');
+    _ctState[key] = setTimeout(() => delete _ctState[key], 4000);
+  }
+}
+
 /* ── RECIBO DE CUOTA (I4) ──────────────────────────────────── */
 function verReciboKuota(clienteId, k) {
   const c = cargarClientes().find(x => x.id === clienteId);
@@ -6548,7 +6584,9 @@ function confirmarPagoInline(id, k, metodo) {
 }
 
 function desmarcarPagoInline(id, k) {
-  if (!confirm('¿Quitar el registro de pago de esta cuota?')) return;
+  _confirmToast('desmPago-' + id + '-' + k, 'Quitará el registro de pago de esta cuota', () => _doDesmarcarPago(id, k));
+}
+function _doDesmarcarPago(id, k) {
   const lista = cargarClientes();
   const c     = lista.find(x => x.id === id);
   if (!c || !c.pagos) return;
@@ -6815,10 +6853,12 @@ function editarClienteActual() {
 function eliminarClienteActual() {
   const c = cargarClientes().find(x => x.id === clienteActualId);
   if (!c) return;
-  if (!confirm(`¿Eliminar a "${c.nombre}"? Esta acción no se puede deshacer.`)) return;
-  guardarStorage(cargarClientes().filter(x => x.id !== clienteActualId));
-  cerrarModal('modalDetalle');
-  renderClientes();
+  _confirmToast('delCli-' + clienteActualId, `Eliminará a "${c.nombre}" — irreversible`, () => {
+    guardarStorage(cargarClientes().filter(x => x.id !== clienteActualId));
+    cerrarModal('modalDetalle');
+    renderClientes();
+    mostrarToast('🗑 Cliente eliminado', 'var(--gris-texto)');
+  });
 }
 
 /* ── DATA FUNCTIONS PARA TABLA DE CUOTAS ───────────────────── */
@@ -6889,7 +6929,7 @@ function calcInteresesMora(c) {
 
 function guardarTasaMora() {
   const v = parseFloat(document.getElementById('cfgTasaMora')?.value || 0) || 0;
-  if (v < 0 || v > 30) { alert('La tasa mora debe estar entre 0 y 30%'); return; }
+  if (v < 0 || v > 30) { mostrarToast('❌ La tasa mora debe estar entre 0 y 30%', 'var(--rojo)'); return; }
   saveConfig({ tasaMora: v });
   const ok = document.getElementById('tasaMoraOk');
   if (ok) { ok.style.display = ''; setTimeout(() => ok.style.display = 'none', 2500); }
@@ -7740,9 +7780,11 @@ async function guardarUsuario() {
 }
 
 function eliminarUsuario(id) {
-  if (!confirm('¿Eliminar este usuario?')) return;
-  guardarUsuarios(cargarUsuarios().filter(u => u.id !== id));
-  renderUsuarios();
+  _confirmToast('delUsr-' + id, 'Eliminará este usuario', () => {
+    guardarUsuarios(cargarUsuarios().filter(u => u.id !== id));
+    renderUsuarios();
+    mostrarToast('🗑 Usuario eliminado', 'var(--gris-texto)');
+  });
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -7937,19 +7979,20 @@ function appPreviewSol() {
   const frecuencia = document.getElementById('appSolFrecuencia')?.value || 'mensual';
   if (!monto || !cuotas) { prev.style.display = 'none'; return; }
 
-  /* BUG-01: usar tasa y períodos correctos para cada frecuencia (no dividir la cuota mensual) */
-  const freqCfg      = { mensual:{n:1,py:12}, quincenal:{n:2,py:24}, semanal:{n:4,py:52} };
+  /* tasa y períodos correctos — cuotas ya está en unidades del período seleccionado */
+  const freqCfg      = { diaria:{py:365}, semanal:{py:52}, quincenal:{py:24}, mensual:{py:12} };
   const cfg          = freqCfg[frecuencia] || freqCfg.mensual;
-  const nPeriodos    = cuotas * cfg.n;
+  const nPeriodos    = cuotas;
   const iPeriodo     = _appProdSel.tna / cfg.py / 100;
   const fac          = iPeriodo === 0 ? 1 : Math.pow(1 + iPeriodo, nPeriodos);
   const cuotaFreq    = iPeriodo === 0 ? Math.round(monto / nPeriodos) : Math.round(monto * iPeriodo * fac / (fac - 1));
   const total        = cuotaFreq * nPeriodos;
-  const freqLabelMap = { mensual: '/mes', quincenal: '/quincenal', semanal: '/semana' };
+  const freqLabelMap = { diaria:'/día', semanal:'/semana', quincenal:'/quincena', mensual:'/mes' };
   const cuotasLabel  = {
+    diaria:    `${cuotas} cuota${cuotas>1?'s':''} diaria${cuotas>1?'s':''}`,
+    semanal:   `${cuotas} cuota${cuotas>1?'s':''} semanal${cuotas>1?'es':''}`,
+    quincenal: `${cuotas} cuota${cuotas>1?'s':''} quincenal${cuotas>1?'s':''}`,
     mensual:   `${cuotas} cuota${cuotas>1?'s':''}`,
-    quincenal: `${nPeriodos} cuotas quincenales`,
-    semanal:   `${nPeriodos} cuotas semanales`,
   };
 
   prev.innerHTML = `
@@ -8005,10 +8048,10 @@ function enviarSolicitudApp() {
     if (!monto || isNaN(monto))       return solErr('Ingresá el monto solicitado');
     if (monto < _appProdSel.montoMin) return solErr(`Monto mínimo: Gs. ${_appProdSel.montoMin.toLocaleString('es-PY')}`);
     if (monto > _appProdSel.montoMax) return solErr(`Monto máximo: Gs. ${_appProdSel.montoMax.toLocaleString('es-PY')}`);
-    /* BUG-01: tasa del período correcto (no dividir cuota mensual) */
-    const _freqCfg2 = { mensual:{n:1,py:12}, quincenal:{n:2,py:24}, semanal:{n:4,py:52} };
+    /* tasa del período correcto por frecuencia — cuotas ya es el nº de períodos */
+    const _freqCfg2 = { diaria:{py:365}, semanal:{py:52}, quincenal:{py:24}, mensual:{py:12} };
     const _cfg2     = _freqCfg2[frecuencia] || _freqCfg2.mensual;
-    const _nPer2    = cuotas * _cfg2.n;
+    const _nPer2    = cuotas;
     const _iPer2    = _appProdSel.tna / _cfg2.py / 100;
     const _fac2     = _iPer2 === 0 ? 1 : Math.pow(1 + _iPer2, _nPer2);
     cuotaEstimada   = _iPer2 === 0 ? Math.round(monto / _nPer2) : Math.round(monto * _iPer2 * _fac2 / (_fac2 - 1));
@@ -9023,7 +9066,9 @@ function eliminarNota(clienteId, noteId) {
   /* BUG-06: solo admin/cobrador pueden eliminar notas */
   const _s = getSession();
   if (!_s || _s.rol === 'cliente') { mostrarToast('❌ Sin permisos para eliminar notas', 'var(--rojo)'); return; }
-  if (!confirm('¿Eliminar esta nota?')) return;
+  _confirmToast('delNota-' + clienteId + '-' + noteId, 'Eliminará esta nota', () => _doEliminarNota(clienteId, noteId));
+}
+function _doEliminarNota(clienteId, noteId) {
   const lista = cargarClientes();
   const c = lista.find(x => x.id === clienteId);
   if (!c || !c.notas) return;
@@ -9148,12 +9193,14 @@ function eliminarDesdePerfil() {
   }
   const c = cargarClientes().find(x => x.id === clienteActualId);
   if (!c) return;
-  if (!confirm(`¿Eliminar a "${c.nombre}"? Esta acción no se puede deshacer.`)) return;
-  _audit('eliminar_cliente', `Cliente: ${c.nombre} · ID: ${c.id} · Monto: ${gs(c.monto||0)}`);
-  guardarStorage(cargarClientes().filter(x => x.id !== clienteActualId));
-  clienteActualId = null;
-  renderClientes();
-  verSeccion('cli');
+  _confirmToast('delCliPerf-' + clienteActualId, `Eliminará a "${c.nombre}" — irreversible`, () => {
+    _audit('eliminar_cliente', `Cliente: ${c.nombre} · ID: ${c.id} · Monto: ${gs(c.monto||0)}`);
+    guardarStorage(cargarClientes().filter(x => x.id !== clienteActualId));
+    clienteActualId = null;
+    renderClientes();
+    verSeccion('cli');
+    mostrarToast('🗑 Cliente eliminado', 'var(--gris-texto)');
+  });
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -9353,6 +9400,7 @@ function exportarBackup() {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+  mostrarToast('💾 Backup descargado correctamente', 'var(--verde)');
 }
 
 function importarBackup(input) {
